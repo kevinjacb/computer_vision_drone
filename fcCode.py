@@ -29,6 +29,7 @@ class VideoStream:
         self.stopEx = True
     
 class Detect:
+    global imgW,imgH
     def __init__(self, stream):
         labels = 'labelmap.txt'
         model_path = 'detect.tflite'
@@ -48,8 +49,8 @@ class Detect:
         self.frame = []
         while len(self.frame) == 0:
             self.frame = stream.read()
-        self.imgW = self.frame.shape[1]
-        self.imgH = self.frame.shape[0]
+        imgW = self.frame.shape[1]
+        imgH = self.frame.shape[0]
         self.imgW_resize = 300 #frame.shape[1]
         self.imgH_resize = 300 #frame.shape[0]
 
@@ -98,10 +99,10 @@ class Detect:
             for i in scores_sorted[-5:]:
                 if (scores[i] < self.confidence_thresh or scores[i] > 1.0) and self.label[i] != 'person':
                     continue
-                ymin = int(max(1,self.imgH*boxes[i][0]))
-                xmin = int(max(1,self.imgW*boxes[i][1]))
-                ymax = int(min(self.imgH,self.imgH*boxes[i][2]))
-                xmax = int(min(self.imgW,self.imgW*boxes[i][3]))
+                ymin = int(max(1,imgH*boxes[i][0]))
+                xmin = int(max(1,imgW*boxes[i][1]))
+                ymax = int(min(imgH,imgH*boxes[i][2]))
+                xmax = int(min(imgW,imgW*boxes[i][3]))
                 cv.rectangle(self.frame,(xmin,ymin),(xmax,ymax),(255,0,0),3)
                 d_rects.append([xmin,ymin,xmax,ymax])
 
@@ -117,9 +118,25 @@ class Detect:
             if cv.waitKey(1) & 0xFF == 27:
                 self.stream.stop()
 
+class PID:
+    global imgW, imgH
+    def __init__(self):
+        self.kp = 1
+        self.kd = 0.5
+        self.ki = 0.01
+        self.center = [imgW//2,imgH//2]
 
-
-
-if __name__ == '__main__':
-    stream = VideoStream().start()
-    detect = Detect(stream=stream).start()
+    def calcPID(self,centroid,prevCentroid):
+        error = self.center[0] - centroid[0]
+        dx = centroid[0] - prevCentroid[0]
+        pidP = int(self.kp*error)
+        pidD = int(self.kd*dx)
+        if abs(centroid[0] - self.center[0]) < 50:
+            pidI = int(self.kI*error)
+        
+        return pidP + pidD + pidI
+    
+    
+stream = VideoStream().start()
+detect = Detect(stream=stream).start()
+imgW = imgH = 0
