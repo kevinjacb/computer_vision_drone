@@ -2,6 +2,7 @@ import tflite_runtime.interpreter as interpreter
 import numpy as np
 import RPi.GPIO as GPIO
 import cv2 as cv
+from centroidtracker import CentroidTracker
 from threading import Thread
 from picamera2 import Picamera2
 
@@ -34,6 +35,8 @@ class Detect:
         self.stream = stream
         self.model = interpreter.Interpreter(model_path=model_path,num_threads=4)
 
+        self.ct = CentroidTracker()
+
         self.input_details = self.model.get_input_details()
         self.output_details = self.model.get_output_details()
 
@@ -60,6 +63,13 @@ class Detect:
         self.confidence_thresh = 0.6
         self.boxes_id, self.classes_id, self.scores_id = 0, 1, 2
 
+        self.label = ''
+        with open(labels,'r') as f:
+            self.label = f.read()
+
+        self.label = self.label.split('\n')
+        if self.label[0] == '???':
+            del(self.label[0])
 
     def start(self):
         Thread(target=self.detect,args=()).start()
@@ -83,19 +93,32 @@ class Detect:
 
             scores_sorted = np.argsort(scores,axis=0)
             
-            for i in range(4):
-                if scores[i] < self.confidence_thresh or scores[i] > 1.0:
+            d_rects = []
+            # print(scores_sorted)
+            for i in scores_sorted[-5:]:
+                if (scores[i] < self.confidence_thresh or scores[i] > 1.0) and self.label[i] != 'person':
                     continue
                 ymin = int(max(1,self.imgH*boxes[i][0]))
                 xmin = int(max(1,self.imgW*boxes[i][1]))
                 ymax = int(min(self.imgH,self.imgH*boxes[i][2]))
                 xmax = int(min(self.imgW,self.imgW*boxes[i][3]))
                 cv.rectangle(self.frame,(xmin,ymin),(xmax,ymax),(255,0,0),3)
+                d_rects.append([xmin,ymin,xmax,ymax])
 
+            objects = self.ct.update(rects=d_rects)
+            
+            for objId, centroid in objects.items():
+                text = "ID {}".format(objId)
+                cv.putText(self.frame, text, (centroid[0] - 10, centroid[1] - 10),cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                cv.circle(self.frame, (centroid[0], centroid[1]), 4, (0, 255, 0), -1)
+            
             cv.imshow('detected',cv.cvtColor(self.frame,cv.COLOR_RGB2BGR))
 
             if cv.waitKey(1) & 0xFF == 27:
                 self.stream.stop()
+
+
+
 
 if __name__ == '__main__':
     stream = VideoStream().start()
