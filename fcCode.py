@@ -4,6 +4,7 @@ import RPi.GPIO as GPIO
 import cv2 as cv
 import sys
 import time
+import math
 from centroidtracker import CentroidTracker
 from threading import Thread
 from picamera2 import Picamera2
@@ -16,8 +17,7 @@ class VideoStream:
         self.piCam.start()
         self.frame = []
         self.stopEx = False
-        imgW,imgH = self.piCam.capture_array().shape[:2]
-
+        imgH,imgW = self.piCam.capture_array().shape[:2]
     def start(self):
         Thread(target=self.update,args=()).start()
         return self
@@ -70,6 +70,8 @@ class Detect:
         self.confidence_thresh = 0.6
         self.boxes_id, self.classes_id, self.scores_id = 0, 1, 2
 
+        self.stopped = False
+
         self.label = ''
         with open(labels,'r') as f:
             self.label = f.read()
@@ -77,13 +79,14 @@ class Detect:
         self.label = self.label.split('\n')
         if self.label[0] == '???':
             del(self.label[0])
-
-    def start(self):
-        Thread(target=self.detect,args=()).start()
+    def getInstance(self):
         return self
+    def start(self):
+        self.stopped = False
+        Thread(target=self.detect,args=()).start()
 
     def detect(self):
-        while not self.stream.stopEx:
+        while not self.stopped:
             self.frame = self.stream.read()
             frame_inp = self.frame.copy()
             frame_inp = cv.resize(frame_inp,(self.imgW_resize,self.imgH_resize),cv.INTER_AREA)
@@ -119,17 +122,18 @@ class Detect:
                 cv.putText(self.frame, text, (centroid[0] - 10, centroid[1] - 10),cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
                 cv.circle(self.frame, (centroid[0], centroid[1]), 4, (0, 255, 0), -1)
             
-            if not is_tracking:
+            if not self.is_tracking:
                 pass                        #TODO
 
             cv.imshow('detected',cv.cvtColor(self.frame,cv.COLOR_RGB2BGR))
+            cv.waitKey(10)
 
-            if cv.waitKey(1) & 0xFF == 27:
-                self.stream.stop()
+    def stop(self):
+        self.stopped = True
 
-class PoseDetection:
+class PoseDetection:  # 0 - jesus pose
     def __init__(self,stream):
-        global imgW,imgH
+        global imgW,imgH,is_tracking
         self.stream = stream
         
         model_path = 'pose.tflite'
@@ -142,6 +146,8 @@ class PoseDetection:
         self.input_index = self.input_details[0]['index']
         self.output_index = self.output_details[0]['index']
 
+        self.stopped = False
+
         self.imgH_resize,self.imgW_resize = self.input_details[0]['shape_signature'][1:3]
         print(self.imgH_resize,self.imgW_resize)
         print('\n')
@@ -149,11 +155,14 @@ class PoseDetection:
         # print(self.input_details)
         # print('\n')
         # print(self.output_details)
+    def getInstance(self):
+        return self
 
+    def start(self):
+        self.stopped = False
         Thread(target=self.getPose,args=()).start()
-
     def getPose(self):
-        while True:
+        while not self.stopped:
             frame = self.stream.read()
             frame_inp = cv.resize(frame,(self.imgH_resize,self.imgW_resize),interpolation=cv.INTER_AREA)
             frame_inp = np.array(np.expand_dims(frame_inp,axis=0),dtype=np.float32)
@@ -162,16 +171,35 @@ class PoseDetection:
             self.model.invoke()
 
             keypoints = self.model.get_tensor(self.output_index)[0][0]
+            rect = self.estimatePose(keypoints)
+            if(rect != None):
+                print('detected ')
+                is_tracking = True
+                triggerDetection()
             for keypoint in keypoints:
                 if keypoint[2] < 0.3:
                     continue
-                cv.circle(frame,(int(imgH*keypoint[1]),int(imgW*keypoint[0])),4,(255,0,0),-1)
+                cv.circle(frame,(int(imgW*keypoint[1]),int(imgH*keypoint[0])),4,(255,0,0),-1)
 
-            cv.imshow('pose',frame)
-            if cv.waitKey(10) & 0xFF == 27:
-                cv.destroyAllWindows()
-                return
-        # sys.exit()
+            cv.imshow('detected',frame)
+            cv.waitKey(10)
+        return
+    def estimatePose(self,keypoints):
+        points = np.arange(5,11)
+        for point in points:
+            if keypoints[point][2] < 0.4:
+                return None
+        dist_wrists = math.dist(keypoints[9][:2], keypoints[10][:2])
+        dist_sum = math.dist(keypoints[5][:2],keypoints[6][:2])
+        for i in range(2):
+            dist_sum += math.dist(keypoints[5+i*2][:2],keypoints[5+(i+1)*2][:2])
+            dist_sum += math.dist(keypoints[6+i*2][:2],keypoints[6+(i+1)*2][:2])
+        if abs(dist_sum - dist_wrists) < dist_sum/7:
+            return [keypoints[5][:2],keypoints[6][:2],keypoints[11][:2],keypoints[12][:2]]
+        return None
+        
+    def stop(self):
+        self.stopped=True
 
 class PID:
     def __init__(self):
@@ -192,9 +220,20 @@ class PID:
         return pidP + pidD + pidI
     
 
+def triggerDetection():
+    global detect,pdetect
+    if is_tracking:
+        pdetect.stop()
+        detect.start()  
+    else:
+        detect.stop()
+        pdetect.start()
+
 imgW = imgH = 0
+is_tracking = False
 stream = VideoStream().start()
 time.sleep(1)
-# detect = Detect(stream=stream).start()
-
-PoseDetection(stream=stream)
+pdetect = PoseDetection(stream=stream).getInstance()
+detect = Detect(stream=stream).getInstance()
+# print(detect,pdetect)
+triggerDetection()
