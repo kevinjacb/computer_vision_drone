@@ -2,17 +2,21 @@ import tflite_runtime.interpreter as interpreter
 import numpy as np
 import RPi.GPIO as GPIO
 import cv2 as cv
+import sys
+import time
 from centroidtracker import CentroidTracker
 from threading import Thread
 from picamera2 import Picamera2
 
 class VideoStream:
     def __init__(self):
+        global imgW,imgH
         self.piCam = Picamera2()
         self.piCam.configure(self.piCam.create_preview_configuration())
         self.piCam.start()
         self.frame = []
         self.stopEx = False
+        imgW,imgH = self.piCam.capture_array().shape[:2]
 
     def start(self):
         Thread(target=self.update,args=()).start()
@@ -29,10 +33,13 @@ class VideoStream:
         self.stopEx = True
     
 class Detect:
-    global imgW,imgH
     def __init__(self, stream):
+        global imgW,imgH
         labels = 'labelmap.txt'
         model_path = 'detect.tflite'
+        
+        self.is_tracking = False                    #TODO
+
         self.stream = stream
         self.model = interpreter.Interpreter(model_path=model_path,num_threads=4)
 
@@ -49,8 +56,7 @@ class Detect:
         self.frame = []
         while len(self.frame) == 0:
             self.frame = stream.read()
-        imgW = self.frame.shape[1]
-        imgH = self.frame.shape[0]
+
         self.imgW_resize = 300 #frame.shape[1]
         self.imgH_resize = 300 #frame.shape[0]
 
@@ -113,14 +119,63 @@ class Detect:
                 cv.putText(self.frame, text, (centroid[0] - 10, centroid[1] - 10),cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
                 cv.circle(self.frame, (centroid[0], centroid[1]), 4, (0, 255, 0), -1)
             
+            if not is_tracking:
+                pass                        #TODO
+
             cv.imshow('detected',cv.cvtColor(self.frame,cv.COLOR_RGB2BGR))
 
             if cv.waitKey(1) & 0xFF == 27:
                 self.stream.stop()
 
+class PoseDetection:
+    def __init__(self,stream):
+        global imgW,imgH
+        self.stream = stream
+        
+        model_path = 'pose.tflite'
+        self.model = interpreter.Interpreter(model_path=model_path,num_threads=4)
+        self.model.allocate_tensors()
+
+        self.input_details = self.model.get_input_details()
+        self.output_details = self.model.get_output_details()
+
+        self.input_index = self.input_details[0]['index']
+        self.output_index = self.output_details[0]['index']
+
+        self.imgH_resize,self.imgW_resize = self.input_details[0]['shape_signature'][1:3]
+        print(self.imgH_resize,self.imgW_resize)
+        print('\n')
+        print(imgW,imgH)
+        # print(self.input_details)
+        # print('\n')
+        # print(self.output_details)
+
+        Thread(target=self.getPose,args=()).start()
+
+    def getPose(self):
+        while True:
+            frame = self.stream.read()
+            frame_inp = cv.resize(frame,(self.imgH_resize,self.imgW_resize),interpolation=cv.INTER_AREA)
+            frame_inp = np.array(np.expand_dims(frame_inp,axis=0),dtype=np.float32)
+
+            self.model.set_tensor(self.input_index,frame_inp)
+            self.model.invoke()
+
+            keypoints = self.model.get_tensor(self.output_index)[0][0]
+            for keypoint in keypoints:
+                if keypoint[2] < 0.3:
+                    continue
+                cv.circle(frame,(int(imgH*keypoint[1]),int(imgW*keypoint[0])),4,(255,0,0),-1)
+
+            cv.imshow('pose',frame)
+            if cv.waitKey(10) & 0xFF == 27:
+                cv.destroyAllWindows()
+                return
+        # sys.exit()
+
 class PID:
-    global imgW, imgH
     def __init__(self):
+        global imgW, imgH
         self.kp = 1
         self.kd = 0.5
         self.ki = 0.01
@@ -136,7 +191,10 @@ class PID:
         
         return pidP + pidD + pidI
     
-    
-stream = VideoStream().start()
-detect = Detect(stream=stream).start()
+
 imgW = imgH = 0
+stream = VideoStream().start()
+time.sleep(1)
+# detect = Detect(stream=stream).start()
+
+PoseDetection(stream=stream)
