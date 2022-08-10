@@ -44,8 +44,6 @@ class Detect:
         self.stream = stream
         self.model = interpreter.Interpreter(model_path=model_path,num_threads=4)
 
-        self.ct = CentroidTracker()
-
         self.input_details = self.model.get_input_details()
         self.output_details = self.model.get_output_details()
 
@@ -84,6 +82,7 @@ class Detect:
         return self
     def start(self,poly=None):
         self.stopped = False
+        self.ct = CentroidTracker()
         Thread(target=self.detect,args=(poly,)).start()
 
     def lockOn(self,rects):
@@ -99,6 +98,7 @@ class Detect:
             return i
         return -1
     def detect(self,poly=None):
+        global is_tracking
         self.poly = poly
         lockedOn = False
         if self.poly == None:
@@ -146,14 +146,21 @@ class Detect:
 
             objects = self.ct.update(rects=d_rects)
             
+            if id not in objects:
+                is_tracking = False
+                triggerDetection()
+
             for i, (objId, centroid) in enumerate(objects.items()):
                 if not lockedOn and id != -1 and id == i:
                     id = objId
                     lockedOn = True
                 if id != -1 and id == objId:
                     text = "ID {}".format(objId)
+                    cv.rectangle(self.frame,d_rects[i][:2],d_rects[i][2:4],(255,0,0),3)
                     cv.putText(self.frame, text, (centroid[0] - 10, centroid[1] - 10),cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
                     cv.circle(self.frame, (centroid[0], centroid[1]), 4, (0, 255, 0), -1)
+                    break
+                    
             
             if not self.is_tracking:
                 pass                        #TODO
