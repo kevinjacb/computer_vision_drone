@@ -5,6 +5,7 @@ import cv2 as cv
 import sys
 import time
 import math
+import matplotlib.pyplot as plt
 from centroidtracker import CentroidTracker
 from threading import Thread
 from picamera2 import Picamera2
@@ -86,6 +87,7 @@ class Detect:
         Thread(target=self.detect,args=()).start()
 
     def detect(self):
+        global frames
         while not self.stopped:
             self.frame = self.stream.read()
             frame_inp = self.frame.copy()
@@ -125,8 +127,7 @@ class Detect:
             if not self.is_tracking:
                 pass                        #TODO
 
-            cv.imshow('detected',cv.cvtColor(self.frame,cv.COLOR_RGB2BGR))
-            cv.waitKey(10)
+            frames['detection'] = self.frame
 
     def stop(self):
         self.stopped = True
@@ -161,7 +162,9 @@ class PoseDetection:  # 0 - jesus pose
     def start(self):
         self.stopped = False
         Thread(target=self.getPose,args=()).start()
+
     def getPose(self):
+        global frames,is_tracking
         while not self.stopped:
             frame = self.stream.read()
             frame_inp = cv.resize(frame,(self.imgH_resize,self.imgW_resize),interpolation=cv.INTER_AREA)
@@ -173,17 +176,16 @@ class PoseDetection:  # 0 - jesus pose
             keypoints = self.model.get_tensor(self.output_index)[0][0]
             rect = self.estimatePose(keypoints)
             if(rect != None):
-                print('detected ')
+                # print('detected ')
                 is_tracking = True
                 triggerDetection()
             for keypoint in keypoints:
                 if keypoint[2] < 0.3:
                     continue
                 cv.circle(frame,(int(imgW*keypoint[1]),int(imgH*keypoint[0])),4,(255,0,0),-1)
+                frames['pose'] = frame
 
-            cv.imshow('detected',frame)
-            cv.waitKey(10)
-        return
+        
     def estimatePose(self,keypoints):
         points = np.arange(5,11)
         for point in points:
@@ -231,9 +233,22 @@ def triggerDetection():
 
 imgW = imgH = 0
 is_tracking = False
+frames = dict({'pose': 0,'detection' : 1})
+
 stream = VideoStream().start()
 time.sleep(1)
 pdetect = PoseDetection(stream=stream).getInstance()
 detect = Detect(stream=stream).getInstance()
 # print(detect,pdetect)
 triggerDetection()
+while True:
+    cv.imshow('pose',frames['pose'])
+    cv.imshow('detection',frames['detection'])
+    # print(is_tracking)
+    if cv.waitKey(1) & 0xFF == 27:
+        stream.stop()
+        pdetect.stop()
+        detect.stop()
+        break
+
+cv.destroyAllWindows()
