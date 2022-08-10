@@ -82,12 +82,31 @@ class Detect:
             del(self.label[0])
     def getInstance(self):
         return self
-    def start(self):
+    def start(self,poly=None):
         self.stopped = False
-        Thread(target=self.detect,args=()).start()
+        Thread(target=self.detect,args=(poly,)).start()
 
-    def detect(self):
+    def lockOn(self,rects):
+        for i,(xmin,ymin,xmax,ymax) in enumerate(rects):
+            for x,y in self.poly:
+                if x >= xmin and x <= xmax:
+                    if y >= ymin and y <= ymax:
+                        continue
+                    else:
+                        break
+                else:
+                    break
+            return i
+        return -1
+    def detect(self,poly=None):
+        self.poly = poly
+        lockedOn = False
+        if self.poly == None:
+            is_tracking = False
+            triggerDetection()
+
         global frames
+        id = -1
         while not self.stopped:
             self.frame = self.stream.read()
             frame_inp = self.frame.copy()
@@ -105,6 +124,7 @@ class Detect:
 
             scores_sorted = np.argsort(scores,axis=0)
             
+
             d_rects = []
             # print(scores_sorted)
             for i in scores_sorted[-5:]:
@@ -114,15 +134,26 @@ class Detect:
                 xmin = int(max(1,imgW*boxes[i][1]))
                 ymax = int(min(imgH,imgH*boxes[i][2]))
                 xmax = int(min(imgW,imgW*boxes[i][3]))
-                cv.rectangle(self.frame,(xmin,ymin),(xmax,ymax),(255,0,0),3)
+                if id == -1:
+                    cv.rectangle(self.frame,(xmin,ymin),(xmax,ymax),(255,0,0),3)
                 d_rects.append([xmin,ymin,xmax,ymax])
+
+            if id == -1:
+                id = self.lockOn(d_rects)
+                if id == -1:
+                    is_tracking = False
+                    triggerDetection()
 
             objects = self.ct.update(rects=d_rects)
             
-            for objId, centroid in objects.items():
-                text = "ID {}".format(objId)
-                cv.putText(self.frame, text, (centroid[0] - 10, centroid[1] - 10),cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                cv.circle(self.frame, (centroid[0], centroid[1]), 4, (0, 255, 0), -1)
+            for i, (objId, centroid) in enumerate(objects.items()):
+                if not lockedOn and id != -1 and id == i:
+                    id = objId
+                    lockedOn = True
+                if id != -1 and id == objId:
+                    text = "ID {}".format(objId)
+                    cv.putText(self.frame, text, (centroid[0] - 10, centroid[1] - 10),cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                    cv.circle(self.frame, (centroid[0], centroid[1]), 4, (0, 255, 0), -1)
             
             if not self.is_tracking:
                 pass                        #TODO
@@ -163,6 +194,9 @@ class PoseDetection:  # 0 - jesus pose
         self.stopped = False
         Thread(target=self.getPose,args=()).start()
 
+    def getRect(self):
+        return self.rect
+
     def getPose(self):
         global frames,is_tracking
         while not self.stopped:
@@ -174,11 +208,12 @@ class PoseDetection:  # 0 - jesus pose
             self.model.invoke()
 
             keypoints = self.model.get_tensor(self.output_index)[0][0]
-            rect = self.estimatePose(keypoints)
-            if(rect != None):
+            self.rect = self.estimatePose(keypoints)
+            if(self.rect != None):
                 # print('detected ')
                 is_tracking = True
                 triggerDetection()
+
             for keypoint in keypoints:
                 if keypoint[2] < 0.3:
                     continue
@@ -223,10 +258,11 @@ class PID:
     
 
 def triggerDetection():
-    global detect,pdetect
+    global detect,pdetect,is_tracking
     if is_tracking:
+        poly = pdetect.getRect()
         pdetect.stop()
-        detect.start()  
+        detect.start(poly)  
     else:
         detect.stop()
         pdetect.start()
@@ -242,10 +278,12 @@ detect = Detect(stream=stream).getInstance()
 # print(detect,pdetect)
 triggerDetection()
 while True:
-    cv.imshow('pose',frames['pose'])
-    cv.imshow('detection',frames['detection'])
+    if not is_tracking:
+        cv.imshow('pose',frames['pose'])
+    else:
+        cv.imshow('detection',frames['detection'])
     # print(is_tracking)
-    if cv.waitKey(1) & 0xFF == 27:
+    if cv.waitKey(10) & 0xFF == 27:
         stream.stop()
         pdetect.stop()
         detect.stop()
