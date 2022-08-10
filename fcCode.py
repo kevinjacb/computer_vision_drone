@@ -85,9 +85,9 @@ class Detect:
         self.ct = CentroidTracker()
         Thread(target=self.detect,args=(poly,)).start()
 
-    def lockOn(self,rects):
+    def isIn(self,rects,points):
         for i,(xmin,ymin,xmax,ymax) in enumerate(rects):
-            for x,y in self.poly:
+            for x,y in points:
                 if x >= xmin and x <= xmax:
                     if y >= ymin and y <= ymax:
                         continue
@@ -100,7 +100,7 @@ class Detect:
     def detect(self,poly=None):
         global is_tracking
         self.poly = poly
-        lockedOn = False
+        locked_on = False
         if self.poly == None:
             is_tracking = False
             triggerDetection()
@@ -127,7 +127,7 @@ class Detect:
 
             d_rects = []
             # print(scores_sorted)
-            for i in scores_sorted[-5:]:
+            for i in scores_sorted[-4:]:
                 if (scores[i] < self.confidence_thresh or scores[i] > 1.0) and self.label[i] != 'person':
                     continue
                 ymin = int(max(1,imgH*boxes[i][0]))
@@ -139,31 +139,37 @@ class Detect:
                 d_rects.append([xmin,ymin,xmax,ymax])
 
             if id == -1:
-                id = self.lockOn(d_rects)
+                id = self.isIn(d_rects,self.poly)
                 if id == -1:
                     is_tracking = False
                     triggerDetection()
 
             objects = self.ct.update(rects=d_rects)
             
-            if id not in objects:
-                is_tracking = False
-                triggerDetection()
+            # if locked_on and id not in list(objects.keys()):
+            #     is_tracking = False
+            #     triggerDetection()
 
-            for i, (objId, centroid) in enumerate(objects.items()):
-                if not lockedOn and id != -1 and id == i:
-                    id = objId
-                    lockedOn = True
-                if id != -1 and id == objId:
-                    text = "ID {}".format(objId)
-                    cv.rectangle(self.frame,d_rects[i][:2],d_rects[i][2:4],(255,0,0),3)
+            if not locked_on and id != -1:
+                id = int(list(objects.keys())[id])
+                locked_on = True
+            
+            else:
+                try:
+                    centroid = objects[id]
+                    text = "Tracking tis idiot {}".format(id)
                     cv.putText(self.frame, text, (centroid[0] - 10, centroid[1] - 10),cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
                     cv.circle(self.frame, (centroid[0], centroid[1]), 4, (0, 255, 0), -1)
-                    break
-                    
+
+                except:
+                    is_tracking = False
+                    triggerDetection()
             
-            if not self.is_tracking:
-                pass                        #TODO
+            rect_id = self.isIn(d_rects,list([objects[id]]))
+            cv.rectangle(self.frame,d_rects[rect_id][:2],d_rects[rect_id][-2:],(255,0,0),3)
+            
+            # if not self.is_tracking:
+            #     pass                        #TODO
 
             frames['detection'] = self.frame
 
