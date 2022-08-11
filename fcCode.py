@@ -19,13 +19,19 @@ class VideoStream:
         self.frame = []
         self.stopEx = False
         imgH,imgW = self.piCam.capture_array().shape[:2]
-    def start(self):
-        Thread(target=self.update,args=()).start()
-        return self
+    # def start(self):                                   #to run on a separate thread
+    #     Thread(target=self.update,args=()).start()
+    #     return self
+
+    # def update(self):
+    #     while not self.stopEx:
+    #         self.frame = self.piCam.capture_array()[:,:,:3]
 
     def update(self):
-        while not self.stopEx:
-            self.frame = self.piCam.capture_array()[:,:,:3]
+        self.frame = self.piCam.capture_array()[:,:,:3]
+    
+    def getInstance(self):
+        return self
 
     def read(self):
         return np.array(self.frame.copy())
@@ -182,7 +188,7 @@ class PoseDetection:  # 0 - jesus pose
         self.stream = stream
         
         model_path = 'pose.tflite'
-        self.model = interpreter.Interpreter(model_path=model_path,num_threads=4)
+        self.model = interpreter.Interpreter(model_path=model_path,num_threads=2)
         self.model.allocate_tensors()
 
         self.input_details = self.model.get_input_details()
@@ -231,7 +237,7 @@ class PoseDetection:  # 0 - jesus pose
                 if keypoint[2] < 0.3:
                     continue
                 cv.circle(frame,(int(imgW*keypoint[1]),int(imgH*keypoint[0])),4,(255,0,0),-1)
-                frames['pose'] = frame
+                frames['detection'] = frame
 
         
     def estimatePose(self,keypoints):
@@ -282,17 +288,19 @@ def triggerDetection():
 
 imgW = imgH = 0
 is_tracking = False
-frames = dict({'pose': 0,'detection' : 1})
+frames = dict({'detection' : 1})
 
-stream = VideoStream().start()
+stream = VideoStream().getInstance()
+stream.update()
 time.sleep(1)
 pdetect = PoseDetection(stream=stream).getInstance()
 detect = Detect(stream=stream).getInstance()
 # print(detect,pdetect)
 triggerDetection()
 while True:
+    stream.update()
     if not is_tracking:
-        cv.imshow('pose',frames['pose'])
+        cv.imshow('detection',frames['detection'])
     else:
         cv.imshow('detection',frames['detection'])
     # print(is_tracking)
