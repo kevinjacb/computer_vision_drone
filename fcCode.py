@@ -277,7 +277,7 @@ class PID:
         pidDX = int(self.kd*dx)
         pidIX = 0
         if abs(curr_mid[0] - self.center[0]) < 50:
-            pidIX = int(self.kI*errorX)
+            pidIX = int(self.ki*errorX)
         prev_box_mid = curr_mid
         return pidPX + pidDX + pidIX
     
@@ -294,38 +294,39 @@ def triggerDetection():
 
 def read_from_arduino():
     global data,data_available
-    # try:
-    data = bus.read_i2c_block_data(ADDR,0,30)
-    data = [chr(s) for s in data]
-    data = ''.join(data).split('#')
-    data = data[1:-1]
-    print(data)
-    data = [int(x) for x in data]
-    data_available = True
-    # except:
-    #     print('oops')
-    #     data_available = False
+    try:
+        data = bus.read_i2c_block_data(ADDR,0,30)
+        data = [chr(s) for s in data]
+        data = ''.join(data).split('#')
+        data = data[1:-1]
+        print(data)
+        data = [int(x) for x in data]
+        data_available = True
+    except:
+        print('An error has occurred')
+        data_available = False
 
 def write_to_arduino(data):
-    data = bytes(data)
+    data = [x.to_bytes(4,'big') for x in data]
     try:
         bus.write_i2c_block_data(ADDR, 0, data)
     except:
         return -1
 
 def isr(channel):
-    global pdetect,detect,data_available
+    global pdetect,detect,data_available,is_tracking
     if GPIO.input(channel):
         while not data_available:
             read_from_arduino()
         triggerDetection()
         time.sleep(0.4)
-        write_to_arduino(1)
+        write_to_arduino([1])
     else:
+        is_tracking=False
         data_available=False
         pdetect.stop()
         detect.stop()
-        write_to_arduino(0)
+        write_to_arduino([0])
 
 ######################### without external mcu
 
@@ -398,8 +399,12 @@ while True:
     if(data_available):
         Pid = pid.calcPID()
         print(Pid)
-        data[1] += Pid
-        write_to_arduino(data)
+        dup_data = data.copy()
+        dup_data[1] += Pid
+        try:
+            write_to_arduino(data)
+        except OverflowError:
+            print('overflow')
     # print(is_tracking)
     if cv.waitKey(10) & 0xFF == 27 :
         stream.stop()
