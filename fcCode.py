@@ -6,6 +6,7 @@ import sys
 import time
 import math
 import matplotlib.pyplot as plt
+import smbus
 from centroidtracker import CentroidTracker
 from threading import Thread
 from picamera2 import Picamera2
@@ -237,7 +238,7 @@ class PoseDetection:  # 0 - jesus pose
                 if keypoint[2] < 0.3:
                     continue
                 cv.circle(frame,(int(imgW*keypoint[1]),int(imgH*keypoint[0])),4,(255,0,0),-1)
-                frames['detection'] = frame
+            frames['detection'] = frame
 
         
     def estimatePose(self,keypoints):
@@ -286,9 +287,63 @@ def triggerDetection():
         detect.stop()
         pdetect.start()
 
+def read_from_arduino():
+    global data,data_available
+    try:
+        data = bus.read_i2c_block_data(9,0,30)
+        data = [chr(s) for s in data[1:] ]
+        data = str(data).split('#')
+        data = [eval(x) for x in data]
+        data_available = True
+    except:
+        data_available = False
+
+######################### without external mcu
+
+# def calcPWM(channel):
+#     global pwm_vals,pwm_counts
+#     if GPIO.input(channel):
+#         started = time.time()
+#     else:
+#         pulse_width = time.time()-started
+#         pwm_vals[channel] += pulse_width
+#         pwm_counts[channel] += 1
+
+# def getPWM():
+#     global pwm_in,pwm_counts
+#     GPIO.add_event_detect(pwm,GPIO.BOTH,calcPWM)
+#     sleep(3)
+#     GPIO.remove_event_detect(pwm)
+#     if 0 in pwm_counts.values():
+#         return False
+#     pwm_vals = {x:float(pwm_vals[x]/pwm_counts[x]) for x in list(pwm_vals.keys())}
+#     print(pwm_vals)
+#     return True
+#pins normally high -> 3,5,7,24,26
+#pins 13 and 15
+# switch_pin = 3
+# pwm_in = (10,11,12,13,15)  #pins for reading pwm signals -> (aileron, rudder)
+# pwm_out = (5,7,24,26,16)
+# pwm_vals = {10:1000,11:1000,12:1000,13:1000,15:1000}
+# pwm_counts = {10:0,11:0,12:0,13:0,15:0}
+
+#########################
+
 imgW = imgH = 0
 is_tracking = False
-frames = dict({'detection' : 1})
+frames = dict({'detection' : np.ones(shape=(640,480,3),dtype=np.float32)})
+
+GPIO.setmode(GPIO.BOARD)
+bus = smbus.SMBus(1)
+######################## without external mcu
+
+# GPIO.setup(pwm_in,GPIO.IN,pull_up_down=GPIO.PUD_DOWN)
+# GPIO.setup(pwm_out,GPIO.OUT)
+# GPIO.output(pwm_out,GPIO.LOW)
+########################
+
+data_available = False #input pwm values from arduino
+data=[] #format - option, rudder, elevator, aileron, gps select
 
 stream = VideoStream().getInstance()
 stream.update()
@@ -297,12 +352,10 @@ pdetect = PoseDetection(stream=stream).getInstance()
 detect = Detect(stream=stream).getInstance()
 # print(detect,pdetect)
 triggerDetection()
+
 while True:
     stream.update()
-    if not is_tracking:
-        cv.imshow('detection',frames['detection'])
-    else:
-        cv.imshow('detection',frames['detection'])
+    cv.imshow('detected',cv.cvtColor(frames['detection'],cv.COLOR_BGR2RGB))
     # print(is_tracking)
     if cv.waitKey(10) & 0xFF == 27:
         stream.stop()
