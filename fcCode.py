@@ -307,25 +307,30 @@ def read_from_arduino():
         data_available = False
 
 def write_to_arduino(data):
-    data = [x.to_bytes(4,'big') for x in data]
-    try:
-        bus.write_i2c_block_data(ADDR, 0, data)
-    except:
-        return -1
+    data_str = '#'.join(map(str,data))
+    data = list(bytes(data_str,'utf-8'))
+    print(data_str,data)
+    # try:
+    bus.write_i2c_block_data(ADDR, 0, data)
+    # except:
+    #     print('error')
 
-def isr(channel):
+def isr(channel):                                           #ERROR gets called unnecessarily
     global pdetect,detect,data_available,is_tracking
+    print('#########################asdfs############################')               
     if GPIO.input(channel):
-        while not data_available:
+        ctr = 0
+        while not data_available and ctr < 10:
             read_from_arduino()
-        triggerDetection()
-        time.sleep(0.4)
-        write_to_arduino([1])
+            ctr+=1
+        if data_available:
+            triggerDetection()
+            write_to_arduino([1])
     else:
-        is_tracking=False
         data_available=False
         pdetect.stop()
         detect.stop()
+        is_tracking=False
         write_to_arduino([0])
 
 ######################### without external mcu
@@ -401,10 +406,7 @@ while True:
         print(Pid)
         dup_data = data.copy()
         dup_data[1] += Pid
-        try:
-            write_to_arduino(data)
-        except OverflowError:
-            print('overflow')
+        write_to_arduino(data)
     # print(is_tracking)
     if cv.waitKey(10) & 0xFF == 27 :
         stream.stop()
