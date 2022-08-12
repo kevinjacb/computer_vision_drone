@@ -105,7 +105,7 @@ class Detect:
             return i
         return -1
     def detect(self,poly=None):
-        global is_tracking
+        global is_tracking,bbox_coordinates
         self.poly = poly
         locked_on = False
         if self.poly == None:
@@ -172,9 +172,10 @@ class Detect:
                     is_tracking = False
                     triggerDetection()
             
+
             rect_id = self.isIn(d_rects,list([objects[id]]))
             cv.rectangle(self.frame,d_rects[rect_id][:2],d_rects[rect_id][-2:],(255,0,0),3)
-            
+            bbox_coordinates = (d_rects[rect_id][:2],d_rects[rect_id][-2:])
             # if not self.is_tracking:
             #     pass                        #TODO
 
@@ -260,21 +261,25 @@ class PoseDetection:  # 0 - jesus pose
 
 class PID:
     def __init__(self):
-        global imgW, imgH
+        global imgW, imgH,prev_box_mid
         self.kp = 1
         self.kd = 0.5
         self.ki = 0.01
-        self.center = [imgW//2,imgH//2]
+        self.center = prev_box_mid = [imgW//2,imgH//2]
 
-    def calcPID(self,centroid,prevCentroid):
-        error = self.center[0] - centroid[0]
-        dx = centroid[0] - prevCentroid[0]
-        pidP = int(self.kp*error)
-        pidD = int(self.kd*dx)
-        if abs(centroid[0] - self.center[0]) < 50:
-            pidI = int(self.kI*error)
-        
-        return pidP + pidD + pidI
+
+    def calcPID(self):
+        global bbox_coordinates,prev_box_mid,curr_mid
+        curr_mid = ((bbox_coordinates[0][0]+bbox_coordinates[1][0])/2,(bbox_coordinates[0][1]+bbox_coordinates[1][1])/2)
+        errorX = self.center[0] - curr_mid[0]
+        dx = curr_mid[0] - prev_box_mid[0]
+        pidPX = int(self.kp*errorX)
+        pidDX = int(self.kd*dx)
+        pidIX = 0
+        if abs(curr_mid[0] - self.center[0]) < 50:
+            pidIX = int(self.kI*errorX)
+        prev_box_mid = curr_mid
+        return pidPX + pidDX + pidIX
     
 
 def triggerDetection():
@@ -289,14 +294,38 @@ def triggerDetection():
 
 def read_from_arduino():
     global data,data_available
+    # try:
+    data = bus.read_i2c_block_data(ADDR,0,30)
+    data = [chr(s) for s in data]
+    data = ''.join(data).split('#')
+    data = data[1:-1]
+    print(data)
+    data = [int(x) for x in data]
+    data_available = True
+    # except:
+    #     print('oops')
+    #     data_available = False
+
+def write_to_arduino(data):
+    data = bytes(data)
     try:
-        data = bus.read_i2c_block_data(9,0,30)
-        data = [chr(s) for s in data[1:] ]
-        data = str(data).split('#')
-        data = [eval(x) for x in data]
-        data_available = True
+        bus.write_i2c_block_data(ADDR, 0, data)
     except:
-        data_available = False
+        return -1
+
+def isr(channel):
+    global pdetect,detect,data_available
+    if GPIO.input(channel):
+        while not data_available:
+            read_from_arduino()
+        triggerDetection()
+        time.sleep(0.4)
+        write_to_arduino(1)
+    else:
+        data_available=False
+        pdetect.stop()
+        detect.stop()
+        write_to_arduino(0)
 
 ######################### without external mcu
 
@@ -328,12 +357,17 @@ def read_from_arduino():
 # pwm_counts = {10:0,11:0,12:0,13:0,15:0}
 
 #########################
+ADDR = 9
+interrupt = 7
 
 imgW = imgH = 0
 is_tracking = False
 frames = dict({'detection' : np.ones(shape=(640,480,3),dtype=np.float32)})
 
 GPIO.setmode(GPIO.BOARD)
+GPIO.setup(interrupt,GPIO.IN,pull_up_down=GPIO.PUD_DOWN)
+GPIO.add_event_detect(interrupt,GPIO.BOTH,isr)
+
 bus = smbus.SMBus(1)
 ######################## without external mcu
 
@@ -343,24 +377,34 @@ bus = smbus.SMBus(1)
 ########################
 
 data_available = False #input pwm values from arduino
-data=[] #format - option, rudder, elevator, aileron, gps select
+data=[0] #format - option, rudder, elevator, aileron, gps select
+
+bbox_coordinates = [[0,0],[0,0]]
+prev_box_mid = (0,0)
 
 stream = VideoStream().getInstance()
 stream.update()
 time.sleep(1)
 pdetect = PoseDetection(stream=stream).getInstance()
 detect = Detect(stream=stream).getInstance()
+pid = PID()
 # print(detect,pdetect)
-triggerDetection()
+
 
 while True:
     stream.update()
     cv.imshow('detected',cv.cvtColor(frames['detection'],cv.COLOR_BGR2RGB))
+
+    if(data_available):
+        Pid = pid.calcPID()
+        print(Pid)
+        data[1] += Pid
+        write_to_arduino(data)
     # print(is_tracking)
-    if cv.waitKey(10) & 0xFF == 27:
+    if cv.waitKey(10) & 0xFF == 27 :
         stream.stop()
         pdetect.stop()
         detect.stop()
         break
-
+GPIO.cleanup()
 cv.destroyAllWindows()
