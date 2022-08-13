@@ -2,9 +2,9 @@
 #include <Servo.h>
 #include <Wire.h>
 
-const byte channel_pin[] = {4,7,8,12,13};
+const byte channel_pin[] = {2,4,7,8,11};
 const byte output_pin[] = {3,5,6,9,10};
-const byte trig_pin = 11;
+const byte trig_pin = 12;
 
 volatile unsigned long rising_start[] = {0, 0, 0, 0, 0};
 volatile long channel_length[] = {1000, 1000, 1000, 1000, 1000};
@@ -13,10 +13,11 @@ String received_data;
 bool toggle = false;
 
 void setup() {
+  Wire.setClock(400000);
   Wire.begin(0x09);
   Wire.onRequest(requestEvent);
   Wire.onReceive(receiveEvent);
-  Serial.begin(57600);
+  Serial.begin(115200);
 
   for(byte i : channel_pin)
     pinMode(i,INPUT);
@@ -86,8 +87,8 @@ void loop() {
     digitalWrite(trig_pin,LOW);
     Serial.print("normal mode: ");
   }
-
+//  if(received_data.length() > 
     
   Serial.println(received_data);
-  delay(100);
+  delay(20);
 }
