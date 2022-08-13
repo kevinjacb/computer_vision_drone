@@ -283,11 +283,12 @@ class PID:
     
 
 def triggerDetection():
-    global detect,pdetect,is_tracking
+    global detect,pdetect,is_tracking,switch_state
     if is_tracking:
         poly = pdetect.getRect()
         pdetect.stop()
         detect.start(poly)  
+        switch_state = 1
     else:
         detect.stop()
         pdetect.start()
@@ -307,6 +308,10 @@ def read_from_arduino():
         data_available = False
 
 def write_to_arduino(data):
+    global switch_state
+    data = data.copy()
+    if len(data) > 2:
+        data.append(switch_state)
     data_str = '#'.join(map(str,data))
     data = list(bytes(data_str,'utf-8'))
     print(data_str,data)
@@ -315,9 +320,9 @@ def write_to_arduino(data):
     # except:
     #     print('error')
 
-def isr(channel):                                           #ERROR gets called unnecessarily
+def isr(channel):                                           
     global pdetect,detect,data_available,is_tracking
-    print('#########################asdfs############################')               
+    # print('#########################test############################')               
     if GPIO.input(channel):
         ctr = 0
         while not data_available and ctr < 10:
@@ -325,7 +330,6 @@ def isr(channel):                                           #ERROR gets called u
             ctr+=1
         if data_available:
             triggerDetection()
-            write_to_arduino([1])
     else:
         data_available=False
         pdetect.stop()
@@ -363,7 +367,7 @@ def isr(channel):                                           #ERROR gets called u
 # pwm_counts = {10:0,11:0,12:0,13:0,15:0}
 
 #########################
-ADDR = 9
+ADDR = 0x09
 interrupt = 7
 
 imgW = imgH = 0
@@ -372,6 +376,7 @@ frames = dict({'detection' : np.ones(shape=(640,480,3),dtype=np.float32)})
 
 GPIO.setmode(GPIO.BOARD)
 GPIO.setup(interrupt,GPIO.IN,pull_up_down=GPIO.PUD_DOWN)
+
 GPIO.add_event_detect(interrupt,GPIO.BOTH,isr)
 
 bus = smbus.SMBus(1)
@@ -384,6 +389,7 @@ bus = smbus.SMBus(1)
 
 data_available = False #input pwm values from arduino
 data=[0] #format - option, rudder, elevator, aileron, gps select
+switch_state = 0
 
 bbox_coordinates = [[0,0],[0,0]]
 prev_box_mid = (0,0)
@@ -396,17 +402,19 @@ detect = Detect(stream=stream).getInstance()
 pid = PID()
 # print(detect,pdetect)
 
-
+prev_time = time.time()
 while True:
     stream.update()
     cv.imshow('detected',cv.cvtColor(frames['detection'],cv.COLOR_BGR2RGB))
 
     if(data_available):
         Pid = pid.calcPID()
-        print(Pid)
+        # print(Pid)
         dup_data = data.copy()
         dup_data[1] += Pid
-        write_to_arduino(data)
+        if(time.time() - prev_time > 0.50):
+            write_to_arduino(dup_data)
+            prev_time = time.time()
     # print(is_tracking)
     if cv.waitKey(10) & 0xFF == 27 :
         stream.stop()
