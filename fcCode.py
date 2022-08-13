@@ -6,7 +6,7 @@ import sys
 import time
 import math
 import matplotlib.pyplot as plt
-import smbus
+import smbus2
 from centroidtracker import CentroidTracker
 from threading import Thread
 from picamera2 import Picamera2
@@ -292,6 +292,7 @@ def triggerDetection():
     else:
         detect.stop()
         pdetect.start()
+        switch_state=0
 
 def read_from_arduino():
     global data,data_available
@@ -315,10 +316,10 @@ def write_to_arduino(data):
     data_str = '#'.join(map(str,data))
     data = list(bytes(data_str,'utf-8'))
     print(data_str,data)
-    # try:
-    bus.write_i2c_block_data(ADDR, 0, data)
-    # except:
-    #     print('error')
+    try:
+        bus.write_i2c_block_data(ADDR, 0, data)
+    except:
+        print('error')
 
 def isr(channel):                                           
     global pdetect,detect,data_available,is_tracking
@@ -379,7 +380,7 @@ GPIO.setup(interrupt,GPIO.IN,pull_up_down=GPIO.PUD_DOWN)
 
 GPIO.add_event_detect(interrupt,GPIO.BOTH,isr)
 
-bus = smbus.SMBus(1)
+bus = smbus2.SMBus(1)
 ######################## without external mcu
 
 # GPIO.setup(pwm_in,GPIO.IN,pull_up_down=GPIO.PUD_DOWN)
@@ -409,12 +410,14 @@ while True:
 
     if(data_available):
         Pid = pid.calcPID()
-        # print(Pid)
+    #     # print(Pid)
         dup_data = data.copy()
         dup_data[1] += Pid
+        # i2c_time = time.time()
         if(time.time() - prev_time > 0.50):
             write_to_arduino(dup_data)
             prev_time = time.time()
+        # print('i2c time :',(time.time()-i2c_time)*1000)
     # print(is_tracking)
     if cv.waitKey(10) & 0xFF == 27 :
         stream.stop()
