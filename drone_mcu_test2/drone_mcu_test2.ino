@@ -7,10 +7,16 @@ const byte output_pin[] = {3,5,6,9,10};
 const byte trig_pin = 12;
 
 volatile unsigned long rising_start[] = {0, 0, 0, 0, 0};
-volatile long channel_length[] = {1000, 1000, 1000, 1000, 1000};
+volatile long channel_length[] = {1000, 1000, 1000, 1000, 1000},
+ first_channel_length[] = {0,0,0,0,0};
+volatile bool i2c_int[] = {false,false,false,false,false};
+
+byte counter = 0;
 
 String received_data;
 bool toggle = false;
+
+Servo output[5];
 
 void setup() {
   Wire.setClock(400000);
@@ -21,6 +27,11 @@ void setup() {
 
   for(byte i : channel_pin)
     pinMode(i,INPUT);
+
+  for(int i = 0; i < 5; i++){
+    output[i].attach(output_pin[i]);
+    output[i].writeMicroseconds(channel_length[i]);
+  }
   pinMode(trig_pin,OUTPUT);
   digitalWrite(trig_pin,LOW);
 
@@ -34,10 +45,13 @@ void setup() {
 
 void processPin(byte pin) {
   uint8_t trigger = getPinChangeInterruptTrigger(digitalPinToPCINT(channel_pin[pin]));
-
   if(trigger == RISING) {
     rising_start[pin] = micros();
   } else if(trigger == FALLING) {
+    if(i2c_int[pin]){
+      i2c_int[pin] = false;
+      return;
+    }
     channel_length[pin] = micros() - rising_start[pin];
   }
 }
@@ -62,10 +76,29 @@ void onRising4(void) {
   processPin(4);
 }
 
-void receiveEvent(int h){
+void receiveEvent(int bytes){
+//  noInterrupts();
+  for(int i = 0; i < 5; i++)
+    i2c_int[i] = true;
   received_data = "";
-  while(Wire.available())
-    received_data += (char)Wire.read();
+  byte ctr = 0;
+  volatile long rc_length[5];
+  while(Wire.available()){
+    char data = Wire.read();
+    if(received_data != '#')
+      received_data += (char)Wire.read();
+    else{
+      rc_length[ctr++] = received_data.toInt();
+      received_data = "";
+    }
+  }
+  if(received_data.toInt() == 1){
+    toggle = true;
+    for(int i = 0; i < 5; i++)
+      channel_length[i] = rc_length[i];
+  }
+  else
+    toggle = false;
 }
 
 void requestEvent(){
@@ -88,7 +121,15 @@ void loop() {
     Serial.print("normal mode: ");
   }
 //  if(received_data.length() > 
-    
-  Serial.println(received_data);
+  
+  for(int i = 0; i < 5; i++)
+    if(channel_length[i] > 990 && channel_length[i] < 2200)
+      output[i].writeMicroseconds(channel_length[i]);
+  for(int i : channel_length){
+      Serial.print(i);
+      Serial.print(" ");
+    }
+    Serial.println();
+//  Serial.println(received_data);
   delay(20);
 }
