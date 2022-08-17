@@ -29,7 +29,7 @@ class VideoStream:
     #         self.frame = self.piCam.capture_array()[:,:,:3]
 
     def update(self):
-        self.frame = self.piCam.capture_array()[:,:,:3]
+        self.frame = cv.rotate(self.piCam.capture_array()[:,:,:3],cv.ROTATE_180)
     
     def getInstance(self):
         return self
