@@ -11,9 +11,10 @@ volatile long channel_length[] = {1000, 1000, 1000, 1000, 1000},
  first_channel_length[] = {0,0,0,0,0};
 volatile bool i2c_int[] = {false,false,false,false,false};
 
+int rlen = 0;
 byte counter = 0;
 
-String received_data;
+String received_data="";
 bool toggle = false;
 
 Servo output[5];
@@ -45,6 +46,8 @@ void setup() {
 
 void processPin(byte pin) {
   uint8_t trigger = getPinChangeInterruptTrigger(digitalPinToPCINT(channel_pin[pin]));
+  if(toggle && pin > 0)
+    return;
   if(trigger == RISING) {
     rising_start[pin] = micros();
   } else if(trigger == FALLING) {
@@ -77,28 +80,11 @@ void onRising4(void) {
 }
 
 void receiveEvent(int bytes){
-//  noInterrupts();
   for(int i = 0; i < 5; i++)
     i2c_int[i] = true;
   received_data = "";
-  byte ctr = 0;
-  volatile long rc_length[5];
-  while(Wire.available()){
-    char data = Wire.read();
-    if(received_data != '#')
-      received_data += (char)Wire.read();
-    else{
-      rc_length[ctr++] = received_data.toInt();
-      received_data = "";
-    }
-  }
-  if(received_data.toInt() == 1){
-    toggle = true;
-    for(int i = 0; i < 5; i++)
-      channel_length[i] = rc_length[i];
-  }
-  else
-    toggle = false;
+  for(int i = 0; i < bytes; i++)
+    received_data += (char)Wire.read();
 }
 
 void requestEvent(){
@@ -120,7 +106,27 @@ void loop() {
     digitalWrite(trig_pin,LOW);
     Serial.print("normal mode: ");
   }
-//  if(received_data.length() > 
+  if((rlen = received_data.length()) > 0){;
+    String process = "";
+    long temp[5];
+    for(int i = 1,ctr = 0; i < rlen && ctr < 5; i++)
+      if(received_data[i] != '#')
+        process += received_data[i];
+      else{
+        process.trim();
+        temp[ctr++] = process.toInt();
+        process = "";
+      }
+      Serial.print(process.toInt());
+      if(process.toInt() == 1){
+        toggle = true;
+        for(int j = 0; j < 5; j++)
+          channel_length[j] = temp[j];
+      }
+      else
+        toggle = false;
+      received_data = "";
+  }
   
   for(int i = 0; i < 5; i++)
     if(channel_length[i] > 990 && channel_length[i] < 2200)

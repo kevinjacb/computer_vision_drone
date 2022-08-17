@@ -89,6 +89,7 @@ class Detect:
         return self
     def start(self,poly=None):
         self.stopped = False
+        print(" Started tracking .........")
         self.ct = CentroidTracker()
         Thread(target=self.detect,args=(poly,)).start()
 
@@ -213,6 +214,7 @@ class PoseDetection:  # 0 - jesus pose
 
     def start(self):
         self.stopped = False
+        print(" Started detecting pose .........")
         Thread(target=self.getPose,args=()).start()
 
     def getRect(self):
@@ -406,11 +408,11 @@ pid = PID()
 prev_time = time.time()
 while True:
     stream.update()
-    cv.imshow('detected',cv.cvtColor(frames['detection'],cv.COLOR_BGR2RGB))
+    # cv.imshow('detected',cv.cvtColor(frames['detection'],cv.COLOR_BGR2RGB))
 
     if(data_available):
         Pid = pid.calcPID()
-    #     # print(Pid)
+        print(Pid)
         dup_data = data.copy()
         dup_data[1] += Pid
         # i2c_time = time.time()
