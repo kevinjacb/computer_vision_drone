@@ -118,6 +118,7 @@ class Detect:
         while not self.stopped:
             self.frame = self.stream.read()
             frame_inp = self.frame.copy()
+            frame_inp = cv.cvtColor(frame_inp,cv.COLOR_RGB2BGR)
             frame_inp = cv.resize(frame_inp,(self.imgW_resize,self.imgH_resize),cv.INTER_AREA)
             if self.input_details[0]['dtype'] == np.float32:
                 frame_inp = (frame_inp - self.mean)/self.std
@@ -136,7 +137,7 @@ class Detect:
             d_rects = []
             # print(scores_sorted)
             for i in scores_sorted[-4:]:
-                if (scores[i] < self.confidence_thresh or scores[i] > 1.0) and self.label[i] != 'person':
+                if (scores[i] < self.confidence_thresh or scores[i] > 1.0) and self.label[classes[i]] != 'person':
                     continue
                 ymin = int(max(1,imgH*boxes[i][0]))
                 xmin = int(max(1,imgW*boxes[i][1]))
