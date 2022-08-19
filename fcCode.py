@@ -73,7 +73,7 @@ class Detect:
         self.input_details = self.model.get_input_details()
         self.output_details = self.model.get_output_details()
 
-        self.confidence_thresh = 0.55
+        self.confidence_thresh = 0.52
         self.boxes_id, self.classes_id, self.scores_id = 0, 1, 2
 
         self.stopped = False
@@ -123,7 +123,6 @@ class Detect:
         while not self.stopped:
             self.frame = self.stream.read()
             frame_inp = self.frame.copy()
-            frame_inp = cv.cvtColor(frame_inp,cv.COLOR_RGB2BGR)
             frame_inp = cv.resize(frame_inp,(self.imgW_resize,self.imgH_resize),cv.INTER_AREA)
             if self.input_details[0]['dtype'] == np.float32:
                 frame_inp = (frame_inp - self.mean)/self.std
@@ -281,20 +280,38 @@ class PID:
         self.kd = 0.3
         self.ki = 0.001
         self.center = prev_box_mid = [imgW//2,imgH//2]
-
+        self. total_area = imgW*imgH
+        self.prev_time = time.time()
 
     def calcPID(self):
-        global bbox_coordinates,prev_box_mid,curr_mid
+        global bbox_coordinates,prev_box_mid,curr_mid, prev_area
+        curr_area = abs(bbox_coordinates[0][0] - bbox_coordinates[1][0])*abs(bbox_coordinates[0][1] - bbox_coordinates[1][1])
         curr_mid = ((bbox_coordinates[0][0]+bbox_coordinates[1][0])/2,(bbox_coordinates[0][1]+bbox_coordinates[1][1])/2)
+
+        # Pid correction -> rudder
         errorX = self.center[0] - curr_mid[0]
         dx = curr_mid[0] - prev_box_mid[0]
+        dt = time.time() - self.prev_time
+
         pidPX = int(self.kp*errorX)
-        pidDX = int(self.kd*dx)
+        pidDX = int(self.kd*dx/dt)
         pidIX = 0
-        if abs(curr_mid[0] - self.center[0]) < 50:
+        if abs(errorX) < 50:
             pidIX = int(self.ki*errorX)
         prev_box_mid = curr_mid
-        return pidPX + pidDX + pidIX
+        pid_rudder = pidDX + pidDX + pidIX
+
+        errorZ = self.total_area - curr_area
+        dz = curr_area - prev_area
+        pidPZ = int(errorZ/1000)
+        pidDZ = int(self.kd*dz/dt)
+        pid_alieron = pidPZ + pidDZ
+
+        self.prev_time = time.time()
+        if curr_area > 0.4*self.total_area:
+            pid_alieron = 0
+
+        return pid_rudder,pid_alieron
     
 
 def triggerDetection():
@@ -409,6 +426,7 @@ switch_state = 0
 
 bbox_coordinates = [[0,0],[0,0]]
 prev_box_mid = (0,0)
+prev_area = imgH*imgW
 
 stream = VideoStream().getInstance()
 stream.update()
@@ -424,10 +442,12 @@ while True:
     cv.imshow('detected',cv.cvtColor(frames['detection'],cv.COLOR_BGR2RGB))
 
     if(data_available):
-        Pid = -pid.calcPID()
+        PidX,PidZ = pid.calcPID()
+        PidX = -PidX
         # print(Pid)
         dup_data = data.copy()
-        dup_data[1] += Pid
+        dup_data[1] += PidX
+        # dup_data[3] += PidZ                                           #Enable for aileron control
         # i2c_time = time.time()
         if(time.time() - prev_time > 0.50):
             write_to_arduino(dup_data)

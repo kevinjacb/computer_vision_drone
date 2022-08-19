@@ -7,7 +7,8 @@ const byte output_pin[] = {3,5,6,9,10};
 const byte trig_pin = 12;
 
 volatile unsigned long rising_start[] = {0, 0, 0, 0, 0};
-volatile long channel_length[] = {1000, 1000, 1000, 1000, 1000},
+volatile long channel_length[] = {0, 0, 0, 0, 0},
+received_length[] = {0,0,0,0,0},
  first_channel_length[] = {0,0,0,0,0};
 volatile bool i2c_int[] = {false,false,false,false,false};
 
@@ -46,8 +47,8 @@ void setup() {
 
 void processPin(byte pin) {
   uint8_t trigger = getPinChangeInterruptTrigger(digitalPinToPCINT(channel_pin[pin]));
-  if(toggle && pin > 0)
-    return;
+//  if(toggle && pin > 0)
+//    return;
   if(trigger == RISING) {
     rising_start[pin] = micros();
   } else if(trigger == FALLING) {
@@ -106,7 +107,7 @@ void loop() {
     digitalWrite(trig_pin,LOW);
     Serial.print("normal mode: ");
   }
-  if((rlen = received_data.length()) > 0){;
+  if((rlen = received_data.length()) > 0){
     String process = "";
     long temp[5];
     for(int i = 1,ctr = 0; i < rlen && ctr < 5; i++)
@@ -117,25 +118,27 @@ void loop() {
         temp[ctr++] = process.toInt();
         process = "";
       }
-      Serial.print(process.toInt());
       if(process.toInt() == 1){
         toggle = true;
-        for(int j = 0; j < 5; j++)
-          channel_length[j] = temp[j];
+        for(int j = 1; j < 5; j++)
+          received_length [j] = temp[j-1];
       }
       else
         toggle = false;
       received_data = "";
   }
   
-  for(int i = 0; i < 5; i++)
-    if(channel_length[i] > 990 && channel_length[i] < 2200)
+  for(int i = 1; i < 5; i++)
+    if(channel_length[i] > 990 && channel_length[i] < 2200 && !toggle)
       output[i].writeMicroseconds(channel_length[i]);
-  for(int i : channel_length){
+    else if(toggle && received_length[i] > 990 && received_length[i] < 2200)
+      output[i].writeMicroseconds(received_length[i]);
+  for(int i : (toggle)?received_length:channel_length){
       Serial.print(i);
       Serial.print(" ");
     }
-    Serial.println();
+    Serial.print("toggle - >");
+    Serial.println(toggle);
 //  Serial.println(received_data);
   delay(20);
 }
