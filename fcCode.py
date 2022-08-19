@@ -73,7 +73,7 @@ class Detect:
         self.input_details = self.model.get_input_details()
         self.output_details = self.model.get_output_details()
 
-        self.confidence_thresh = 0.6
+        self.confidence_thresh = 0.55
         self.boxes_id, self.classes_id, self.scores_id = 0, 1, 2
 
         self.stopped = False
@@ -93,17 +93,22 @@ class Detect:
         self.ct = CentroidTracker()
         Thread(target=self.detect,args=(poly,)).start()
 
-    def isIn(self,rects,points):
+    def isIn(self,rects,points,cd = False):
+            
         for i,(xmin,ymin,xmax,ymax) in enumerate(rects):
+            flag = False
             for x,y in points:
-                if x >= xmin and x <= xmax:
-                    if y >= ymin and y <= ymax:
-                        continue
-                    else:
-                        break
-                else:
+                if x < xmin or x > xmax or y < ymin or y > ymax:
+                    flag = True
                     break
-            return i
+            if not flag:
+                if cd:
+                    dist = math.dist(((xmin+xmax)/2,(ymin+ymax)/2),points[0])
+                    print('distance -> ',dist)
+                    if dist < 30:
+                        return i
+                    continue
+                return i
         return -1
     def detect(self,poly=None):
         global is_tracking,bbox_coordinates
@@ -131,13 +136,14 @@ class Detect:
             classes = self.model.get_tensor(self.output_details[self.classes_id]['index'])[0]
             scores = self.model.get_tensor(self.output_details[self.scores_id]['index'])[0]
 
-            scores_sorted = np.argsort(scores,axis=0)
+            scores_sorted = list(reversed(np.argsort(scores,axis=0)))
             
 
             d_rects = []
             # print(scores_sorted)
-            for i in scores_sorted[-4:]:
-                if (scores[i] < self.confidence_thresh or scores[i] > 1.0) and self.label[classes[i]] != 'person':
+            for i in scores_sorted[:4]:
+                # print('detected -> ',classes[i])
+                if (scores[i] < self.confidence_thresh or scores[i] > 1.0) or int(classes[i]) != 0:
                     continue
                 ymin = int(max(1,imgH*boxes[i][0]))
                 xmin = int(max(1,imgW*boxes[i][1]))
@@ -149,7 +155,7 @@ class Detect:
 
             if id == -1:
                 id = self.isIn(d_rects,self.poly)
-                if id == -1:
+                if id == -1 and not is_tracking:
                     is_tracking = False
                     triggerDetection()
 
@@ -158,7 +164,7 @@ class Detect:
             # if locked_on and id not in list(objects.keys()):
             #     is_tracking = False
             #     triggerDetection()
-
+            #print('id -> ',id,' poly -> ',self.poly,' rects -> ',d_rects)
             if not locked_on and id != -1:
                 id = int(list(objects.keys())[id])
                 locked_on = True
@@ -174,10 +180,11 @@ class Detect:
                     is_tracking = False
                     triggerDetection()
             
-
-            rect_id = self.isIn(d_rects,list([objects[id]]))
-            cv.rectangle(self.frame,d_rects[rect_id][:2],d_rects[rect_id][-2:],(255,0,0),3)
-            bbox_coordinates = (d_rects[rect_id][:2],d_rects[rect_id][-2:])
+            if locked_on:
+                rect_id = self.isIn(d_rects,list([objects[id]]),cd=True)
+                if(rect_id != -1):
+                    cv.rectangle(self.frame,d_rects[rect_id][:2],d_rects[rect_id][-2:],(255,0,0),3)
+                    bbox_coordinates = (d_rects[rect_id][:2],d_rects[rect_id][-2:])
             # if not self.is_tracking:
             #     pass                        #TODO
 
@@ -222,7 +229,8 @@ class PoseDetection:  # 0 - jesus pose
         return self.rect
 
     def getPose(self):
-        global frames,is_tracking
+        global frames,is_tracking,imgW,imgH
+        hw = [imgH,imgW]
         while not self.stopped:
             frame = self.stream.read()
             frame_inp = cv.resize(frame,(self.imgH_resize,self.imgW_resize),interpolation=cv.INTER_AREA)
@@ -232,6 +240,10 @@ class PoseDetection:  # 0 - jesus pose
             self.model.invoke()
 
             keypoints = self.model.get_tensor(self.output_index)[0][0]
+            for i, keypoint in enumerate(keypoints):
+                keypoints[i][:2] = np.multiply(keypoint[:2],hw)
+                # print('keypoints -> ',keypoints[i][:2])
+            # print(keypoints)
             self.rect = self.estimatePose(keypoints)
             if(self.rect != None):
                 # print('detected ')
@@ -241,7 +253,7 @@ class PoseDetection:  # 0 - jesus pose
             for keypoint in keypoints:
                 if keypoint[2] < 0.3:
                     continue
-                cv.circle(frame,(int(imgW*keypoint[1]),int(imgH*keypoint[0])),4,(255,0,0),-1)
+                cv.circle(frame,(int(keypoint[1]),int(keypoint[0])),4,(255,0,0),-1)
             frames['detection'] = frame
 
         
@@ -265,9 +277,9 @@ class PoseDetection:  # 0 - jesus pose
 class PID:
     def __init__(self):
         global imgW, imgH,prev_box_mid
-        self.kp = 1
-        self.kd = 0.5
-        self.ki = 0.01
+        self.kp = 0.5
+        self.kd = 0.3
+        self.ki = 0.001
         self.center = prev_box_mid = [imgW//2,imgH//2]
 
 
@@ -304,7 +316,7 @@ def read_from_arduino():
         data = [chr(s) for s in data]
         data = ''.join(data).split('#')
         data = data[1:-1]
-        print(data)
+        # print(data)
         data = [int(x) for x in data]
         data_available = True
     except:
@@ -409,11 +421,11 @@ pid = PID()
 prev_time = time.time()
 while True:
     stream.update()
-    # cv.imshow('detected',cv.cvtColor(frames['detection'],cv.COLOR_BGR2RGB))
+    cv.imshow('detected',cv.cvtColor(frames['detection'],cv.COLOR_BGR2RGB))
 
     if(data_available):
-        Pid = pid.calcPID()
-        print(Pid)
+        Pid = -pid.calcPID()
+        # print(Pid)
         dup_data = data.copy()
         dup_data[1] += Pid
         # i2c_time = time.time()
