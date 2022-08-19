@@ -353,6 +353,15 @@ def write_to_arduino(data):
     except:
         print('error')
 
+def record_footage():
+    global frames,stream
+    output= cv.VideoWriter('footage',cv.VideoWriter_fourcc(*'XVID'),25,frames['detection'])
+    
+    while not stream.stopEx:
+        output.write(frames['detection'])
+    output.release()
+
+
 def isr(channel):                                           
     global pdetect,detect,data_available,is_tracking
     # print('#########################test############################')               
@@ -437,6 +446,8 @@ pid = PID()
 # print(detect,pdetect)
 
 prev_time = time.time()
+
+# Thread(target=record_footage,args=()).start()                                                 # uncomment for enabling video recording
 while True:
     stream.update()
     cv.imshow('detected',cv.cvtColor(frames['detection'],cv.COLOR_BGR2RGB))
